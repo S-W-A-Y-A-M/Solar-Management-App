@@ -3,7 +3,7 @@ import time
 import random
 
 # MQTT Broker Details
-broker_address = "raspberrypi.local"
+broker_address = "ws://raspberrypi.local:9001"
 topic_voltage = "solar/voltage"
 topic_smoke = "solar/smoke"
 topic_energy = "solar/energy"
