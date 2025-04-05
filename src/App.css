@@ -1,0 +1,54 @@
+/* Solar Energy Management - Tailwind CSS Styles */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Styles */
+body {
+    @apply bg-gray-100 text-gray-800;
+}
+
+/* Sidebar Styling */
+.sidebar {
+    @apply w-64 bg-blue-700 text-white p-4;
+}
+.sidebar ul li {
+    @apply mb-2;
+}
+.sidebar a {
+    @apply block p-2 hover:bg-blue-600 rounded transition duration-300; 
+}
+
+/* Card Styling */
+.card {
+    @apply p-6 mb-4 bg-white shadow-xl rounded-lg;
+}
+.card h2 {
+    @apply text-lg font-semibold mb-2 text-sky-700;
+}
+
+/* Header Styling */
+.header {
+    @apply p-4 bg-blue-500 text-white text-lg font-semibold flex justify-between items-center;
+}
+.header button {
+    @apply p-2 bg-blue-700 rounded-lg hover:bg-blue-600 transition;
+}
+
+/* Utility Classes */
+.chart-container {
+    @apply w-full h-80;
+}
+.status-text {
+    @apply text-lg font-medium;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
