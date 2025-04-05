@@ -16,9 +16,20 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { motion } from 'framer-motion';
-import axios from 'axios';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './App.css';
+import mqtt from 'mqtt';
+
+const mqttBrokerUrl = 'ws://raspberrypi.local:9001';
+const topics = {
+  voltage: 'solar/voltage',
+  smoke: 'solar/smoke',
+  energy: 'solar/energy',
+  maintenance: 'solar/maintenance',
+  impact: 'solar/impact',
+  microgrid: 'solar/microgrid',
+  emergency: 'solar/emergency'
+};
 
 const fadeIn = {
   hidden: { opacity: 0, y: 30 },
@@ -74,44 +85,99 @@ const Card = ({ title, children }) => (
   </motion.div>
 );
 
-const EnergyTracker = ({ energyData }) => (
-  <Card title="🔋 Real-Time Energy Consumption">
-    <ResponsiveContainer width="100%" height={300}>
-      <LineChart data={energyData}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-        <XAxis dataKey="timestamp" />
-        <YAxis />
-        <Tooltip />
-        <Line
-          type="monotone"
-          dataKey="energy"
-          stroke="#1e40af"
-          strokeWidth={2}
-          dot={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  </Card>
-);
-
-const ImpactVisualizer = ({ energyData }) => {
-  const [impactData, setImpactData] = useState([]);
+const useMQTTData = () => {
+  const [data, setData] = useState({
+    voltage: 0,
+    smoke: 0,
+    energy: 0,
+    maintenance: "Operational",
+    impact: 0,
+    microgrid: "Stable",
+    emergency: "Safe",
+    energyHistory: [],
+    impactHistory: []
+  });
 
   useEffect(() => {
-    setImpactData(
-      energyData.map(({ timestamp, energy }) => ({
-        timestamp,
-        impact: energy * 0.1
-      }))
-    );
-  }, [energyData]);
+    const client = mqtt.connect(mqttBrokerUrl);
+
+    client.on('connect', () => {
+      console.log('Connected to MQTT Broker');
+      Object.values(topics).forEach(topic => client.subscribe(topic));
+    });
+
+    client.on('message', (topic, message) => {
+      const payload = message.toString();
+
+      setData(prevData => {
+        const updatedField = topic.split('/')[1];
+        const value = isNaN(parseFloat(payload)) ? payload : parseFloat(payload);
+
+        const updated = {
+          ...prevData,
+          [updatedField]: value
+        };
+
+        updated.energyHistory = [...prevData.energyHistory.slice(-19), { time: new Date().toLocaleTimeString(), energy: updated.energy }];
+        updated.impactHistory = [...prevData.impactHistory.slice(-19), { time: new Date().toLocaleTimeString(), impact: updated.impact }];
+
+        if (updated.voltage > 250 || updated.smoke > 5) {
+          updated.emergency = "Critical Alert: Voltage/Smoke Level Exceeded!";
+          updated.microgrid = "Shutting Down to Prevent Damage";
+        } else if (
+          updated.microgrid === "Shutting Down to Prevent Damage" &&
+          updated.voltage <= 250 &&
+          updated.smoke <= 5
+        ) {
+          updated.microgrid = "Stable";
+          updated.emergency = "Safe";
+        }
+
+        if (updated.energy > 80) updated.impact += 1;
+        if (updated.impact > 10) updated.maintenance = "Immediate Maintenance Required";
+
+        return updated;
+      });
+    });
+
+    return () => client.end();
+  }, []);
+
+  return data;
+};
+
+const EnergyTracker = () => {
+  const { energyHistory } = useMQTTData();
+  return (
+    <Card title="🔋 Real-Time Energy Consumption">
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={energyHistory}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="time" />
+          <YAxis />
+          <Tooltip />
+          <Line
+            type="monotone"
+            dataKey="energy"
+            stroke="#1e40af"
+            strokeWidth={2}
+            dot={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </Card>
+  );
+};
+
+const ImpactVisualizer = () => {
+  const { impactHistory } = useMQTTData();
 
   return (
     <Card title="🌍 Environmental Impact Visualization">
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={impactData}>
+        <LineChart data={impactHistory}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-          <XAxis dataKey="timestamp" />
+          <XAxis dataKey="time" />
           <YAxis />
           <Tooltip />
           <Line
@@ -127,117 +193,52 @@ const ImpactVisualizer = ({ energyData }) => {
   );
 };
 
-const Maintenance = ({ energyData }) => {
-  const [status, setStatus] = useState('All systems operational');
-
-  useEffect(() => {
-    if (energyData.length) {
-      const avg =
-        energyData.reduce((sum, d) => sum + d.energy, 0) / energyData.length;
-      setStatus(
-        avg < 20
-          ? '⚠️ Performance Degradation Detected!'
-          : '✅ All systems operational'
-      );
-    }
-  }, [energyData]);
+const Maintenance = () => {
+  const { maintenance } = useMQTTData();
 
   return (
     <Card title="🛠 Predictive Maintenance">
-      <p className="fs-5 fw-medium">{status}</p>
+      <p className="fs-5 fw-medium">{maintenance}</p>
     </Card>
   );
 };
 
-const MicrogridControl = ({ energyData }) => {
-  const [gridStatus, setGridStatus] = useState('Stable');
-
-  useEffect(() => {
-    if (energyData.length) {
-      const avg =
-        energyData.reduce((sum, d) => sum + d.energy, 0) / energyData.length;
-      setGridStatus(
-        avg > 80 ? '⚠️ Overload' : avg < 20 ? '⚠️ Underutilized' : '✅ Stable'
-      );
-    }
-  }, [energyData]);
-
+const MicrogridControl = () => {
+  const { microgrid } = useMQTTData();
   return (
-    <Card title="⚡ Smart Microgrid Management">
-      <p className="fs-5 fw-medium">Grid Status: {gridStatus}</p>
+    <Card title="⚡ Microgrid Status">
+      <p className="fs-5 fw-medium">{microgrid}</p>
     </Card>
   );
 };
 
-const EmergencyAlerts = ({ energyData }) => {
-  const [alert, setAlert] = useState('All systems operational');
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (energyData.length) {
-        const last = energyData.at(-1).energy;
-        setAlert(
-          last > 95 ? '🚨 High Energy Surge Detected!' : '✅ All systems operational'
-        );
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [energyData]);
-
+const EmergencyAlerts = () => {
+  const { emergency } = useMQTTData();
   return (
     <Card title="🚨 Emergency Alerts">
-      <p className="fs-5 fw-medium">{alert}</p>
+      <p className="fs-5 fw-bold text-danger">{emergency}</p>
     </Card>
   );
 };
 
-const Dashboard = ({ energyData }) => (
+const Dashboard = () => (
   <div className="row">
     <div className="col-lg-6">
-      <EnergyTracker energyData={energyData} />
-      <Maintenance energyData={energyData} />
+      <EnergyTracker />
+      <Maintenance />
     </div>
     <div className="col-lg-6">
-      <ImpactVisualizer energyData={energyData} />
-      <MicrogridControl energyData={energyData} />
+      <ImpactVisualizer />
+      <MicrogridControl />
     </div>
     <div className="col-12">
-      <EmergencyAlerts energyData={energyData} />
+      <EmergencyAlerts />
     </div>
   </div>
 );
 
 const SolarApp = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [rawEnergyData, setRawEnergyData] = useState([]);
-  const [energyData, setEnergyData] = useState([]);
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    axios
-      .get('http://localhost:5000/api/energy-data')
-      .then(res => setRawEnergyData(res.data))
-      .catch(err => console.error('Failed to load energy data:', err));
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setEnergyData(prev => {
-        if (index < rawEnergyData.length) {
-          const newEntry = {
-            energy: rawEnergyData[index].energy,
-            timestamp: new Date().toLocaleTimeString()
-          };
-          setIndex(i => i + 1);
-          return [...prev, newEntry];
-        }
-        return prev;
-      });
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [index, rawEnergyData]);
 
   return (
     <Router>
@@ -255,12 +256,13 @@ const SolarApp = () => {
           {sidebarOpen && <Sidebar />}
           <main className="flex-grow-1 p-4 bg-light overflow-auto">
             <Routes>
-              <Route path="/dashboard" element={<Dashboard energyData={energyData} />} />
-              <Route path="/energy-tracker" element={<EnergyTracker energyData={energyData} />} />
-              <Route path="/impact-visualizer" element={<ImpactVisualizer energyData={energyData} />} />
-              <Route path="/maintenance" element={<Maintenance energyData={energyData} />} />
-              <Route path="/microgrid-control" element={<MicrogridControl energyData={energyData} />} />
-              <Route path="/emergency-alerts" element={<EmergencyAlerts energyData={energyData} />} />
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/energy-tracker" element={<EnergyTracker />} />
+              <Route path="/impact-visualizer" element={<ImpactVisualizer />} />
+              <Route path="/maintenance" element={<Maintenance />} />
+              <Route path="/microgrid-control" element={<MicrogridControl />} />
+              <Route path="/emergency-alerts" element={<EmergencyAlerts />} />
             </Routes>
           </main>
         </div>
